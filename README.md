@@ -1,0 +1,1 @@
+# finetune-IJEPA-on-EUROSAT

@@ -11,17 +11,21 @@ import yaml
 from tqdm import tqdm
 import numpy as np
 from typing import Dict, Optional
+from sklearn.neighbors import KNeighborsClassifier
 
 from .pretrained_models import HuggingFaceIJEPAFinetune
 from .data_loader import get_dataloaders
 
 
 class Trainer:
-    """Trainer for I-JEPA fine-tuning"""
+    """Trainer for I-JEPA linear probing or kNN evaluation."""
     
     def __init__(self, config: Dict, device: str = 'cuda'):
         self.config = config
         self.device = device
+        self.mode = config['training'].get('mode', 'linear_probe')
+        if self.mode not in {'linear_probe', 'knn'}:
+            raise ValueError(f"Unsupported mode '{self.mode}'. Use 'linear_probe' or 'knn'.")
         
         # Create directories
         os.makedirs(config['training']['checkpoint_path'], exist_ok=True)
@@ -39,12 +43,13 @@ class Trainer:
         
         # Loss function
         self.criterion = nn.CrossEntropyLoss()
-        
-        # Optimizer
-        self.optimizer = self._build_optimizer()
-        
-        # Scheduler
-        self.scheduler = self._build_scheduler()
+
+        self.optimizer = None
+        self.scheduler = None
+        if self.mode == 'linear_probe':
+            # Optimizer and scheduler are needed only for supervised head training.
+            self.optimizer = self._build_optimizer()
+            self.scheduler = self._build_scheduler()
         
         # Metrics
         self.best_acc = 0.0
@@ -120,16 +125,9 @@ class Trainer:
         total_loss = 0.0
         correct = 0
         total = 0
-        
-        # Progressive fine-tuning: unfreeze encoder after N epochs
-        unfreeze_after = self.config['finetuning'].get('unfreeze_after_epochs', None)
-        if unfreeze_after and self.current_epoch == unfreeze_after:
-            if hasattr(self.model, 'unfreeze_encoder'):
-                print(f"\n🔓 Unfreezing encoder at epoch {self.current_epoch}")
-                self.model.unfreeze_encoder()
-                # Rebuild optimizer to include unfrozen parameters
-                self.optimizer = self._build_optimizer()
-                self.scheduler = self._build_scheduler()
+
+        if self.optimizer is None or self.scheduler is None:
+            raise RuntimeError("train_epoch() can only run in 'linear_probe' mode.")
         
         pbar = tqdm(self.train_loader, desc=f'Epoch {self.current_epoch}')
         
@@ -169,6 +167,43 @@ class Trainer:
         avg_acc = 100. * correct / total
         
         return avg_loss, avg_acc
+
+    @torch.no_grad()
+    def _extract_features(self, loader, desc: str):
+        """Extract frozen encoder CLS features and labels for kNN."""
+        self.model.eval()
+        all_features = []
+        all_labels = []
+
+        for images, targets in tqdm(loader, desc=desc):
+            images = images.to(self.device)
+            outputs = self.model.encoder(pixel_values=images)
+            cls_features = outputs.last_hidden_state[:, 0]
+            all_features.append(cls_features.cpu())
+            all_labels.append(targets.cpu())
+
+        features = torch.cat(all_features, dim=0).numpy()
+        labels = torch.cat(all_labels, dim=0).numpy()
+        return features, labels
+
+    @torch.no_grad()
+    def evaluate_knn(self) -> float:
+        """Run kNN on encoder features (train set as gallery, test set as query)."""
+        k = int(self.config['training'].get('knn_k', 20))
+
+        train_features, train_labels = self._extract_features(
+            self.train_loader, desc='Extracting train features'
+        )
+        test_features, test_labels = self._extract_features(
+            self.test_loader, desc='Extracting test features'
+        )
+
+        knn = KNeighborsClassifier(n_neighbors=k, metric='cosine', weights='distance', n_jobs=-1)
+        knn.fit(train_features, train_labels)
+        predictions = knn.predict(test_features)
+
+        acc = float((predictions == test_labels).mean() * 100.0)
+        return acc
     
     @torch.no_grad()
     def evaluate(self) -> tuple:
@@ -225,7 +260,15 @@ class Trainer:
         print(f'Loaded checkpoint from epoch {self.current_epoch}')
     
     def train(self):
-        """Main training loop"""
+        """Main execution loop."""
+        if self.mode == 'knn':
+            print('Running kNN evaluation with frozen I-JEPA encoder')
+            knn_acc = self.evaluate_knn()
+            self.writer.add_scalar('Accuracy/knn', knn_acc, 0)
+            self.writer.close()
+            print(f'kNN Test Acc: {knn_acc:.2f}%')
+            return knn_acc
+
         num_epochs = self.config['training']['epochs']
         eval_frequency = self.config['training']['eval_frequency']
         save_frequency = self.config['training']['save_frequency']
@@ -277,6 +320,7 @@ class Trainer:
         self.save_checkpoint('final_model.pth')
         
         self.writer.close()
+        return test_acc
 
 
 def train_model(config_path: str):

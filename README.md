@@ -1,13 +1,11 @@
-# I-JEPA Fine-tuning sur MNIST, CIFAR-10 et CIFAR-100
+# I-JEPA sur EuroSAT: Linear Probing et kNN
 
-Fine-tuning du modèle **I-JEPA** (Image-based Joint-Embedding Predictive Architecture) de Meta/Facebook sur des datasets de classification d'images.
+Évaluation du modèle **I-JEPA** (Image-based Joint-Embedding Predictive Architecture) de Meta/Facebook sur **EuroSAT** avec deux modes uniquement: **linear probing** et **kNN**.
 
 ## 🎯 Description
 
-Ce projet utilise le modèle **I-JEPA ViT-H/14** pré-entraîné disponible sur Hugging Face (`facebook/ijepa_vith14_1k`) pour faire du fine-tuning supervisé sur :
-- **MNIST** : Chiffres manuscrits (10 classes)
-- **CIFAR-10** : Images naturelles (10 classes)  
-- **CIFAR-100** : Images naturelles (100 classes)
+Ce projet utilise le modèle **I-JEPA ViT-H/14** pré-entraîné disponible sur Hugging Face (`facebook/ijepa_vith14_1k`) sur le dataset:
+- **EuroSAT** : imagerie satellite (10 classes)
 
 ## 🚀 Installation Rapide
 
@@ -28,45 +26,34 @@ pip install -r requirements.txt
 
 ## 🎓 Utilisation
 
-### Entraînement Simple
+### Exécution Simple
 
 ```bash
-# MNIST (par défaut)
-python train_ijepa.py --dataset MNIST
-
-# CIFAR-10
-python train_ijepa.py --dataset CIFAR10
-
-# CIFAR-100
-python train_ijepa.py --dataset CIFAR100
+# EuroSAT (par défaut)
+python train_ijepa.py --dataset EuroSAT
 ```
 
 ### Modes d'Entraînement
 
-**Full Fine-tuning** (tout le modèle est entraîné) :
-```bash
-python train_ijepa.py --dataset MNIST --mode full
-```
-
 **Linear Probing** (seule la tête de classification est entraînée) :
 ```bash
-python train_ijepa.py --dataset MNIST --mode linear
+python train_ijepa.py --dataset EuroSAT --mode linear_probe
 ```
 
-**Progressive Fine-tuning** (commence gelé, dégèle après 10 epochs) :
+**kNN** (aucun entraînement par gradient, classification sur features gelées) :
 ```bash
-python train_ijepa.py --dataset CIFAR10 --mode progressive
+python train_ijepa.py --dataset EuroSAT --mode knn --knn-k 20
 ```
 
 ### Options Avancées
 
 ```bash
 python train_ijepa.py \
-  --dataset CIFAR10 \
-  --mode full \
-  --epochs 100 \
+  --dataset EuroSAT \
+  --mode linear_probe \
+  --epochs 20 \
   --batch-size 32 \
-  --lr 1e-4
+  --lr 1e-3
 ```
 
 ### Configuration Personnalisée
@@ -82,8 +69,8 @@ python train_ijepa.py --config config.yaml
 finetune-IJEPA/
 ├── src/
 │   ├── pretrained_models.py  # Chargement I-JEPA depuis Hugging Face
-│   ├── data_loader.py        # Datasets MNIST/CIFAR
-│   └── train.py              # Trainer pour fine-tuning
+│   ├── data_loader.py        # Dataset EuroSAT (CSV)
+│   └── train.py              # Linear probing + kNN
 ├── train_ijepa.py            # Script principal
 ├── config.yaml               # Configuration par défaut
 ├── requirements.txt          # Dépendances
@@ -94,8 +81,9 @@ finetune-IJEPA/
 
 1. **Chargement du Modèle** : I-JEPA ViT-H/14 est téléchargé depuis Hugging Face
 2. **Ajout d'une Tête de Classification** : Une couche linéaire pour la prédiction de classes
-3. **Fine-tuning** : Entraînement supervisé avec Cross-Entropy Loss
-4. **Évaluation** : Accuracy sur test set
+3. **Linear probing** : Entraînement supervisé de la tête de classification (encodeur gelé)
+4. **kNN** : Extraction de features CLS puis classification k-plus proches voisins
+5. **Évaluation** : Accuracy sur le split test
 
 ## 📈 Monitoring
 
@@ -112,7 +100,7 @@ Métriques disponibles :
 
 ## 💾 Checkpoints
 
-Les modèles sont sauvegardés dans `checkpoints/` :
+Les modèles sont sauvegardés dans `checkpoints/` (mode `linear_probe`) :
 - `best_model.pth` : Meilleur modèle (meilleure accuracy)
 - `final_model.pth` : Modèle final
 - `checkpoint_epoch_X.pth` : Checkpoints périodiques
@@ -121,7 +109,8 @@ Les modèles sont sauvegardés dans `checkpoints/` :
 
 ```yaml
 dataset:
-  name: 'MNIST'
+  name: 'EuroSAT'
+  data_path: './EuroSAT'
   batch_size: 64
   image_size: 224
 
@@ -129,28 +118,22 @@ model:
   pretrained_name: 'ijepa-vith14-1k'  # facebook/ijepa_vith14_1k
 
 training:
-  epochs: 50
-  base_lr: 2e-4
+  mode: 'linear_probe'
+  knn_k: 20
+  epochs: 20
+  base_lr: 1e-3
   
 finetuning:
-  freeze_encoder: False  # Full fine-tuning
+  freeze_encoder: True
 ```
 
 ## 🎯 Performances Attendues
 
-Les datasets sont téléchargés automatiquement lors du premier lancement.
+Le dataset EuroSAT est utilisé via les fichiers `train.csv` et `test.csv` présents dans le dossier `EuroSAT/`.
 
-### MNIST (50 epochs)
-- **Full fine-tuning** : ~99%+ accuracy
-- **Linear probe** : ~98%+ accuracy
-
-### CIFAR-10 (50-100 epochs)  
-- **Full fine-tuning** : ~85-92% accuracy
-- **Linear probe** : ~75-85% accuracy
-
-### CIFAR-100 (100+ epochs)
-- **Full fine-tuning** : ~70-80% accuracy
-- **Linear probe** : ~55-65% accuracy
+### EuroSAT
+- **Linear probe** : accuracy dépend des hyperparamètres (epochs, LR, batch size)
+- **kNN** : accuracy dépend principalement de `--knn-k` et de la qualité des features
 
 *Note : Les performances dépendent des hyperparamètres*
 
@@ -166,8 +149,8 @@ python train_ijepa.py --batch-size 32  # Réduire batch size
 - Augmenter `num_workers` dans `config.yaml`
 
 **Modèle ne converge pas** :
-- Essayer le mode `--mode linear` d'abord
-- Réduire le learning rate : `--lr 1e-4`
+- Essayer `--mode knn` pour un baseline sans entraînement
+- Ajuster `--knn-k` ou réduire le learning rate en linear probing
 
 ## 📚 Références
 

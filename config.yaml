@@ -2,8 +2,8 @@
 
 # Dataset configuration
 dataset:
-  name: 'MNIST'  # Options: 'MNIST', 'CIFAR10', 'CIFAR100'
-  data_path: './data'
+  name: 'EuroSAT'  # Options: 'EuroSAT'
+  data_path: './EuroSAT'
   batch_size: 64
   num_workers: 4
   image_size: 224
@@ -17,9 +17,11 @@ model:
 
 # Training configuration
 training:
-  epochs: 50
+  mode: 'linear_probe'  # Options: 'linear_probe', 'knn'
+  knn_k: 20
+  epochs: 20
   warmup_epochs: 5
-  base_lr: 2e-4
+  base_lr: 1e-3
   weight_decay: 0.05
   save_frequency: 10
   eval_frequency: 5
@@ -28,5 +30,5 @@ training:
 
 # Fine-tuning configuration
 finetuning:
-  freeze_encoder: False  # True = Linear probe, False = Full fine-tuning
-  unfreeze_after_epochs: null  # Optional: unfreeze after N epochs
+  freeze_encoder: True
+  unfreeze_after_epochs: null

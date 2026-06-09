@@ -1,5 +1,5 @@
 """
-Quick start script for training with I-JEPA pre-trained models
+Quick start script for linear probing or kNN evaluation with I-JEPA
 """
 
 import argparse
@@ -13,14 +13,10 @@ IJEPA_MODEL = 'ijepa-vith14-1k'  # facebook/ijepa_vith14_1k
 
 
 def load_ijepa_config(dataset: str):
-    """Load I-JEPA config for a given dataset"""
-    
-    # Determine number of classes
-    num_classes = {
-        'MNIST': 10,
-        'CIFAR10': 10,
-        'CIFAR100': 100
-    }.get(dataset, 10)
+    """Load I-JEPA config for a given dataset."""
+
+    # EuroSAT has 10 classes.
+    num_classes = 10
     
     # Batch size for I-JEPA ViT-H/14 (large model)
     batch_size = 64
@@ -29,7 +25,7 @@ def load_ijepa_config(dataset: str):
     config = {
         'dataset': {
             'name': dataset,
-            'data_path': './data',
+            'data_path': './EuroSAT',
             'batch_size': batch_size,
             'num_workers': 4,
             'image_size': 224
@@ -42,9 +38,11 @@ def load_ijepa_config(dataset: str):
             'dropout': 0.1
         },
         'training': {
-            'epochs': 50,
+            'mode': 'linear_probe',
+            'knn_k': 20,
+            'epochs': 20,
             'warmup_epochs': 5,
-            'base_lr': 2e-4,
+            'base_lr': 1e-3,
             'weight_decay': 0.05,
             'save_frequency': 10,
             'eval_frequency': 5,
@@ -52,7 +50,7 @@ def load_ijepa_config(dataset: str):
             'log_dir': f'./logs/ijepa_{dataset.lower()}'
         },
         'finetuning': {
-            'freeze_encoder': False,
+            'freeze_encoder': True,
             'unfreeze_after_epochs': None
         }
     }
@@ -61,15 +59,15 @@ def load_ijepa_config(dataset: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Fine-tune I-JEPA on various datasets')
+    parser = argparse.ArgumentParser(description='Run linear probing or kNN with I-JEPA')
     
-    parser.add_argument('--dataset', type=str, default='MNIST',
-                       choices=['MNIST', 'CIFAR10', 'CIFAR100'],
+    parser.add_argument('--dataset', type=str, default='EuroSAT',
+                       choices=['EuroSAT'],
                        help='Dataset to train on')
     
-    parser.add_argument('--mode', type=str, default='full',
-                       choices=['full', 'linear', 'progressive'],
-                       help='Training mode: full fine-tuning, linear probe, or progressive')
+    parser.add_argument('--mode', type=str, default='linear_probe',
+                       choices=['linear_probe', 'knn'],
+                       help='Execution mode: linear probing or kNN evaluation')
     
     parser.add_argument('--epochs', type=int, default=None,
                        help='Number of epochs (overrides default)')
@@ -79,6 +77,9 @@ def main():
     
     parser.add_argument('--lr', type=float, default=None,
                        help='Learning rate (overrides default)')
+
+    parser.add_argument('--knn-k', type=int, default=None,
+                       help='Number of neighbors for kNN mode')
     
     parser.add_argument('--config', type=str, default=None,
                        help='Path to custom config file (overrides preset)')
@@ -103,38 +104,38 @@ def main():
     
     if args.lr:
         config['training']['base_lr'] = args.lr
+
+    if args.knn_k:
+        config['training']['knn_k'] = args.knn_k
     
-    # Set training mode
-    if args.mode == 'linear':
+    # Set execution mode
+    config['training']['mode'] = args.mode
+    if args.mode == 'linear_probe':
         config['finetuning']['freeze_encoder'] = True
         config['finetuning']['unfreeze_after_epochs'] = None
         config['training']['base_lr'] = 1e-3  # Higher LR for linear probe
         config['training']['epochs'] = min(20, config['training']['epochs'])
-        print("🔒 LINEAR PROBING MODE: Only training classifier head")
+        print("🔒 LINEAR PROBING MODE: Training only the classification head")
     
-    elif args.mode == 'progressive':
+    elif args.mode == 'knn':
         config['finetuning']['freeze_encoder'] = True
-        config['finetuning']['unfreeze_after_epochs'] = 10
-        print("🔄 PROGRESSIVE MODE: Starting frozen, will unfreeze after 10 epochs")
-    
-    else:  # full
-        config['finetuning']['freeze_encoder'] = False
         config['finetuning']['unfreeze_after_epochs'] = None
-        print("🚀 FULL FINE-TUNING MODE: Training entire model")
+        config['training']['epochs'] = 0
+        print("📌 KNN MODE: No gradient training, encoder features + kNN classifier")
     
     # Print configuration
     print("\n" + "="*70)
-    print("I-JEPA Fine-tuning Configuration")
+    print("I-JEPA Linear Probe / kNN Configuration")
     print("="*70)
     print(f"Model:          I-JEPA ViT-H/14 (facebook/ijepa_vith14_1k)")
     print(f"Dataset:        {config['dataset']['name']}")
-    print(f"Mode:           {args.mode.upper()}")
+    print(f"Mode:           {args.mode}")
     print(f"Batch size:     {config['dataset']['batch_size']}")
     print(f"Epochs:         {config['training']['epochs']}")
     print(f"Learning rate:  {config['training']['base_lr']}")
     print(f"Freeze encoder: {config['finetuning']['freeze_encoder']}")
-    if config['finetuning']['unfreeze_after_epochs']:
-        print(f"Unfreeze after: {config['finetuning']['unfreeze_after_epochs']} epochs")
+    if args.mode == 'knn':
+        print(f"kNN neighbors:  {config['training']['knn_k']}")
     print(f"Device:         {'CUDA' if torch.cuda.is_available() else 'CPU'}")
     if torch.cuda.is_available():
         print(f"GPU:            {torch.cuda.get_device_name(0)}")
@@ -143,12 +144,14 @@ def main():
     # Train
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     trainer = Trainer(config, device)
-    trainer.train()
+    final_acc = trainer.train()
     
     print("\n" + "="*70)
-    print("✅ Training completed!")
-    print(f"Best accuracy: {trainer.best_acc:.2f}%")
-    print(f"Checkpoints saved in: {config['training']['checkpoint_path']}")
+    print("✅ Run completed!")
+    print(f"Final accuracy: {final_acc:.2f}%")
+    if args.mode == 'linear_probe':
+        print(f"Best accuracy: {trainer.best_acc:.2f}%")
+        print(f"Checkpoints saved in: {config['training']['checkpoint_path']}")
     print(f"Logs saved in: {config['training']['log_dir']}")
     print("="*70 + "\n")
 

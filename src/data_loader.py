@@ -1,12 +1,15 @@
 """
-Data loading utilities for MNIST, CIFAR-10, and CIFAR-100
+Data loading utilities for EuroSAT and torchvision benchmark datasets
 """
 
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision import datasets, transforms
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
+from PIL import Image
+import csv
+import os
 
 
 class GrayscaleToRGB:
@@ -41,8 +44,68 @@ class DatasetFactory:
             return DatasetFactory._get_cifar10(data_path, train, img_size, augment)
         elif name == 'CIFAR100':
             return DatasetFactory._get_cifar100(data_path, train, img_size, augment)
+        elif name == 'EuroSAT':
+            return DatasetFactory._get_eurosat(data_path, train, img_size, augment)
         else:
             raise ValueError(f"Unknown dataset: {name}")
+
+    @staticmethod
+    def _get_eurosat(data_path: str, train: bool, img_size: int, augment: bool):
+        """Load EuroSAT dataset from CSV splits."""
+        if train and augment:
+            transform = transforms.Compose([
+                transforms.Resize((img_size, img_size)),
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomRotation(15),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                   std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            transform = transforms.Compose([
+                transforms.Resize((img_size, img_size)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                   std=[0.229, 0.224, 0.225])
+            ])
+
+        split_csv = 'train.csv' if train else 'test.csv'
+        return EuroSATCSVDataset(data_path, split_csv, transform)
+
+
+class EuroSATCSVDataset(Dataset):
+    """EuroSAT dataset backed by split CSV files."""
+
+    def __init__(self, root_dir: str, split_csv: str, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.samples = []
+
+        csv_path = os.path.join(root_dir, split_csv)
+        with open(csv_path, 'r', newline='') as csv_file:
+            reader = csv.DictReader(csv_file)
+            for row in reader:
+                filename = row.get('Filename')
+                label = row.get('Label')
+                if filename is None or label is None:
+                    continue
+
+                image_path = os.path.join(root_dir, filename)
+                self.samples.append((image_path, int(label)))
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        image_path, label = self.samples[idx]
+        image = Image.open(image_path).convert('RGB')
+
+        if self.transform is not None:
+            image = self.transform(image)
+
+        return image, label
     
     @staticmethod
     def _get_mnist(data_path: str, train: bool, img_size: int, augment: bool):
@@ -161,7 +224,8 @@ def get_dataloaders(config: dict) -> Tuple[DataLoader, DataLoader]:
     num_classes_map = {
         'MNIST': 10,
         'CIFAR10': 10,
-        'CIFAR100': 100
+        'CIFAR100': 100,
+        'EuroSAT': 10
     }
     num_classes = num_classes_map.get(dataset_name, 10)
     

@@ -25,7 +25,7 @@ def load_ijepa_config(dataset: str):
     config = {
         'dataset': {
             'name': dataset,
-            'data_path': './EuroSAT',
+            'data_path': '/kaggle/input/datasets/apollo2506/eurosat-dataset/EuroSAT',
             'batch_size': batch_size,
             'num_workers': 4,
             'image_size': 224

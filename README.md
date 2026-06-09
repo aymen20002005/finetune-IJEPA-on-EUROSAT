@@ -110,7 +110,7 @@ Les modèles sont sauvegardés dans `checkpoints/` (mode `linear_probe`) :
 ```yaml
 dataset:
   name: 'EuroSAT'
-  data_path: './EuroSAT'
+  data_path: '/kaggle/input/datasets/apollo2506/eurosat-dataset/EuroSAT'
   batch_size: 64
   image_size: 224
 
@@ -129,7 +129,7 @@ finetuning:
 
 ## 🎯 Performances Attendues
 
-Le dataset EuroSAT est utilisé via les fichiers `train.csv` et `test.csv` présents dans le dossier `EuroSAT/`.
+Le dataset EuroSAT est utilisé via les fichiers `train.csv` et `test.csv` présents dans le dossier `/kaggle/input/datasets/apollo2506/eurosat-dataset/EuroSAT`.
 
 ### EuroSAT
 - **Linear probe** : accuracy dépend des hyperparamètres (epochs, LR, batch size)

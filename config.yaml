@@ -2,11 +2,13 @@
 
 # Dataset configuration
 dataset:
-  name: 'EuroSAT'  # Options: 'EuroSAT'
+  name: 'EuroSAT'
   data_path: '/kaggle/input/datasets/apollo2506/eurosat-dataset/EuroSAT'
   batch_size: 64
   num_workers: 4
   image_size: 224
+  val_fraction: 0.1
+  seed: 42
 
 # Model configuration (I-JEPA from Hugging Face)
 model:
@@ -27,6 +29,10 @@ training:
   eval_frequency: 5
   checkpoint_path: './checkpoints'
   log_dir: './logs'
+  early_stopping:
+    enabled: false
+    patience: 5
+    min_delta: 0.0
 
 # Fine-tuning configuration
 finetuning:

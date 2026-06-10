@@ -28,7 +28,9 @@ def load_ijepa_config(dataset: str):
             'data_path': '/kaggle/input/datasets/apollo2506/eurosat-dataset/EuroSAT',
             'batch_size': batch_size,
             'num_workers': 4,
-            'image_size': 224
+            'image_size': 224,
+            'val_fraction': 0.1,
+            'seed': 42
         },
         'model': {
             'use_pretrained': True,
@@ -47,7 +49,12 @@ def load_ijepa_config(dataset: str):
             'save_frequency': 10,
             'eval_frequency': 5,
             'checkpoint_path': f'./checkpoints/ijepa_{dataset.lower()}',
-            'log_dir': f'./logs/ijepa_{dataset.lower()}'
+            'log_dir': f'./logs/ijepa_{dataset.lower()}',
+            'early_stopping': {
+                'enabled': False,
+                'patience': 5,
+                'min_delta': 0.0
+            }
         },
         'finetuning': {
             'freeze_encoder': True,
@@ -81,6 +88,13 @@ def main():
     parser.add_argument('--knn-k', type=int, default=None,
                        help='Number of neighbors for kNN mode')
     
+    parser.add_argument('--early-stopping', action='store_true',
+                       help='Enable early stopping based on validation accuracy')
+    parser.add_argument('--patience', type=int, default=None,
+                       help='Early stopping patience in epochs')
+    parser.add_argument('--min-delta', type=float, default=None,
+                       help='Minimum validation improvement to reset early stopping counter')
+    
     parser.add_argument('--config', type=str, default=None,
                        help='Path to custom config file (overrides preset)')
     
@@ -107,6 +121,16 @@ def main():
 
     if args.knn_k:
         config['training']['knn_k'] = args.knn_k
+
+    if args.early_stopping:
+        config['training'].setdefault('early_stopping', {})
+        config['training']['early_stopping']['enabled'] = True
+    if args.patience is not None:
+        config['training'].setdefault('early_stopping', {})
+        config['training']['early_stopping']['patience'] = args.patience
+    if args.min_delta is not None:
+        config['training'].setdefault('early_stopping', {})
+        config['training']['early_stopping']['min_delta'] = args.min_delta
     
     # Set execution mode
     config['training']['mode'] = args.mode
@@ -127,7 +151,7 @@ def main():
     print("\n" + "="*70)
     print("I-JEPA Linear Probe / kNN Configuration")
     print("="*70)
-    print(f"Model:          I-JEPA ViT-H/14 (facebook/ijepa_vith14_1k)")
+    print("Model:          I-JEPA ViT-H/14 (facebook/ijepa_vith14_1k)")
     print(f"Dataset:        {config['dataset']['name']}")
     print(f"Mode:           {args.mode}")
     print(f"Batch size:     {config['dataset']['batch_size']}")
@@ -136,6 +160,10 @@ def main():
     print(f"Freeze encoder: {config['finetuning']['freeze_encoder']}")
     if args.mode == 'knn':
         print(f"kNN neighbors:  {config['training']['knn_k']}")
+    if config['training'].get('early_stopping', {}).get('enabled', False):
+        print(f"Early stopping: enabled (patience={config['training']['early_stopping'].get('patience', 5)}, min_delta={config['training']['early_stopping'].get('min_delta', 0.0)})")
+    else:
+        print("Early stopping: disabled")
     print(f"Device:         {'CUDA' if torch.cuda.is_available() else 'CPU'}")
     if torch.cuda.is_available():
         print(f"GPU:            {torch.cuda.get_device_name(0)}")

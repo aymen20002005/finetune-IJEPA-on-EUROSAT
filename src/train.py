@@ -35,7 +35,7 @@ class Trainer:
         self.writer = SummaryWriter(config['training']['log_dir'])
         
         # Get dataloaders
-        self.train_loader, self.test_loader = get_dataloaders(config)
+        self.train_loader, self.val_loader, self.test_loader = get_dataloaders(config)
         
         # Build model
         self.model = self._build_model()
@@ -50,6 +50,13 @@ class Trainer:
             # Optimizer and scheduler are needed only for supervised head training.
             self.optimizer = self._build_optimizer()
             self.scheduler = self._build_scheduler()
+
+        # Early stopping
+        early_stopping_config = self.config['training'].get('early_stopping', {})
+        self.early_stopping_enabled = bool(early_stopping_config.get('enabled', False))
+        self.early_stopping_patience = int(early_stopping_config.get('patience', 5))
+        self.early_stopping_min_delta = float(early_stopping_config.get('min_delta', 0.0))
+        self.early_stopping_counter = 0
         
         # Metrics
         self.best_acc = 0.0
@@ -206,14 +213,17 @@ class Trainer:
         return acc
     
     @torch.no_grad()
-    def evaluate(self) -> tuple:
-        """Evaluate on test set"""
+    def evaluate(self, loader=None, desc: str = 'Evaluating') -> tuple:
+        """Evaluate on a dataset loader."""
         self.model.eval()
+        if loader is None:
+            loader = self.test_loader
+
         total_loss = 0.0
         correct = 0
         total = 0
         
-        for images, targets in tqdm(self.test_loader, desc='Evaluating'):
+        for images, targets in tqdm(loader, desc=desc):
             images = images.to(self.device)
             targets = targets.to(self.device)
             
@@ -227,7 +237,7 @@ class Trainer:
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
         
-        avg_loss = total_loss / len(self.test_loader)
+        avg_loss = total_loss / len(loader)
         avg_acc = 100. * correct / total
         
         return avg_loss, avg_acc
@@ -270,7 +280,6 @@ class Trainer:
             return knn_acc
 
         num_epochs = self.config['training']['epochs']
-        eval_frequency = self.config['training']['eval_frequency']
         save_frequency = self.config['training']['save_frequency']
         
         print(f"Starting training for {num_epochs} epochs")
@@ -290,31 +299,36 @@ class Trainer:
             self.writer.add_scalar('LearningRate', self.optimizer.param_groups[0]['lr'], epoch)
             
             print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%')
+
+            # Validate every epoch
+            val_loss, val_acc = self.evaluate(self.val_loader, desc='Validating')
+            self.writer.add_scalar('Loss/val', val_loss, epoch)
+            self.writer.add_scalar('Accuracy/val', val_acc, epoch)
+            print(f'Epoch {epoch}: Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
             
-            # Evaluate
-            if (epoch + 1) % eval_frequency == 0:
-                test_loss, test_acc = self.evaluate()
-                
-                # Log test metrics
-                self.writer.add_scalar('Loss/test', test_loss, epoch)
-                self.writer.add_scalar('Accuracy/test', test_acc, epoch)
-                
-                print(f'Epoch {epoch}: Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
-                
-                # Save best model
-                if test_acc > self.best_acc:
-                    self.best_acc = test_acc
-                    self.save_checkpoint('best_model.pth')
-                    print(f'New best accuracy: {self.best_acc:.2f}%')
-            
+            # Save best model based on validation accuracy
+            if val_acc > self.best_acc + self.early_stopping_min_delta:
+                self.best_acc = val_acc
+                self.early_stopping_counter = 0
+                self.save_checkpoint('best_model.pth')
+                print(f'New best validation accuracy: {self.best_acc:.2f}%')
+            else:
+                if self.early_stopping_enabled:
+                    self.early_stopping_counter += 1
+                    print(f'No improvement for {self.early_stopping_counter}/{self.early_stopping_patience} epochs')
+
+            if self.early_stopping_enabled and self.early_stopping_counter >= self.early_stopping_patience:
+                print(f'Early stopping after epoch {epoch} (no improvement for {self.early_stopping_patience} epochs)')
+                break
+
             # Save checkpoint
             if (epoch + 1) % save_frequency == 0:
                 self.save_checkpoint(f'checkpoint_epoch_{epoch}.pth')
         
-        # Final evaluation
-        test_loss, test_acc = self.evaluate()
+        # Final evaluation on test set
+        test_loss, test_acc = self.evaluate(self.test_loader, desc='Testing')
         print(f'\nFinal Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.2f}%')
-        print(f'Best Test Acc: {self.best_acc:.2f}%')
+        print(f'Best Validation Acc: {self.best_acc:.2f}%')
         
         # Save final model
         self.save_checkpoint('final_model.pth')

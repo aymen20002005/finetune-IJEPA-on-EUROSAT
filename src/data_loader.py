@@ -1,58 +1,44 @@
 """
-Data loading utilities for EuroSAT and torchvision benchmark datasets
+Data loading utilities for EuroSAT only
 """
 
 import torch
-from torch.utils.data import DataLoader, Dataset
-from torchvision import datasets, transforms
-import numpy as np
-from typing import Tuple
+from torch.utils.data import DataLoader, Dataset, Subset
+from torchvision import transforms
 from PIL import Image
 import csv
 import os
-
-
-class GrayscaleToRGB:
-    """Convert single-channel grayscale images to 3-channel RGB by repeating channels"""
-    def __call__(self, x):
-        """Convert grayscale tensor to RGB"""
-        if x.shape[0] == 1:
-            return x.repeat(3, 1, 1)
-        return x
+from typing import Tuple
 
 
 class DatasetFactory:
     """Factory class for creating datasets"""
     
     @staticmethod
-    def get_dataset(name: str, data_path: str, train: bool = True, 
+    def get_dataset(name: str, data_path: str, split: str = 'train', 
                    img_size: int = 224, augment: bool = True):
         """
-        Get dataset by name
+        Get dataset by name.
         
         Args:
-            name: Dataset name ('MNIST', 'CIFAR10', 'CIFAR100')
+            name: Dataset name ('EuroSAT')
             data_path: Path to data directory
-            train: Whether to load training or test set
+            split: One of 'train', 'val', 'test'
             img_size: Target image size
             augment: Whether to apply data augmentation
         """
-        
-        if name == 'MNIST':
-            return DatasetFactory._get_mnist(data_path, train, img_size, augment)
-        elif name == 'CIFAR10':
-            return DatasetFactory._get_cifar10(data_path, train, img_size, augment)
-        elif name == 'CIFAR100':
-            return DatasetFactory._get_cifar100(data_path, train, img_size, augment)
-        elif name == 'EuroSAT':
-            return DatasetFactory._get_eurosat(data_path, train, img_size, augment)
-        else:
-            raise ValueError(f"Unknown dataset: {name}")
+        if name != 'EuroSAT':
+            raise ValueError(f"Only EuroSAT is supported in this codebase.")
+
+        return DatasetFactory._get_eurosat(data_path, split, img_size, augment)
 
     @staticmethod
-    def _get_eurosat(data_path: str, train: bool, img_size: int, augment: bool):
-        """Load EuroSAT dataset from CSV splits."""
-        if train and augment:
+    def _get_eurosat(data_path: str, split: str, img_size: int, augment: bool):
+        """Load EuroSAT dataset from CSV split files."""
+        if split not in {'train', 'val', 'test'}:
+            raise ValueError("split must be one of 'train', 'val', or 'test'.")
+
+        if split == 'train' and augment:
             transform = transforms.Compose([
                 transforms.Resize((img_size, img_size)),
                 transforms.RandomHorizontalFlip(),
@@ -61,17 +47,17 @@ class DatasetFactory:
                 transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])
+                                     std=[0.229, 0.224, 0.225])
             ])
         else:
             transform = transforms.Compose([
                 transforms.Resize((img_size, img_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                   std=[0.229, 0.224, 0.225])
+                                     std=[0.229, 0.224, 0.225])
             ])
 
-        split_csv = 'train.csv' if train else 'test.csv'
+        split_csv = f"{split}.csv"
         return EuroSATCSVDataset(data_path, split_csv, transform)
 
 
@@ -106,142 +92,62 @@ class EuroSATCSVDataset(Dataset):
             image = self.transform(image)
 
         return image, label
-    
-    @staticmethod
-    def _get_mnist(data_path: str, train: bool, img_size: int, augment: bool):
-        """Load MNIST dataset"""
-        
-        if train and augment:
-            transform = transforms.Compose([
-                transforms.Resize(img_size),
-                transforms.RandomRotation(10),
-                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
-                transforms.ToTensor(),
-                # Convert grayscale to RGB by repeating channels
-                GrayscaleToRGB(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                   std=[0.229, 0.224, 0.225])
-            ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(img_size),
-                transforms.ToTensor(),
-                GrayscaleToRGB(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                   std=[0.229, 0.224, 0.225])
-            ])
-        
-        dataset = datasets.MNIST(
-            root=data_path,
-            train=train,
-            download=True,
-            transform=transform
-        )
-        
-        return dataset
-    
-    @staticmethod
-    def _get_cifar10(data_path: str, train: bool, img_size: int, augment: bool):
-        """Load CIFAR-10 dataset"""
-        
-        if train and augment:
-            transform = transforms.Compose([
-                transforms.Resize(img_size),
-                transforms.RandomCrop(img_size, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                   std=[0.229, 0.224, 0.225])
-            ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(img_size),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                   std=[0.229, 0.224, 0.225])
-            ])
-        
-        dataset = datasets.CIFAR10(
-            root=data_path,
-            train=train,
-            download=True,
-            transform=transform
-        )
-        
-        return dataset
-    
-    @staticmethod
-    def _get_cifar100(data_path: str, train: bool, img_size: int, augment: bool):
-        """Load CIFAR-100 dataset"""
-        
-        if train and augment:
-            transform = transforms.Compose([
-                transforms.Resize(img_size),
-                transforms.RandomCrop(img_size, padding=4),
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
-                transforms.RandomRotation(15),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                   std=[0.229, 0.224, 0.225])
-            ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(img_size),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                                   std=[0.229, 0.224, 0.225])
-            ])
-        
-        dataset = datasets.CIFAR100(
-            root=data_path,
-            train=train,
-            download=True,
-            transform=transform
-        )
-        
-        return dataset
 
 
-def get_dataloaders(config: dict) -> Tuple[DataLoader, DataLoader]:
+def get_dataloaders(config: dict) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
-    Create train and test dataloaders
+    Create train, validation and test dataloaders
     
     Args:
         config: Configuration dictionary
         
     Returns:
-        Tuple of (train_loader, test_loader)
+        Tuple of (train_loader, val_loader, test_loader)
     """
     dataset_name = config['dataset']['name']
     data_path = config['dataset']['data_path']
     batch_size = config['dataset']['batch_size']
     num_workers = config['dataset']['num_workers']
     img_size = config['dataset']['image_size']
-    
-    # Determine number of classes
-    num_classes_map = {
-        'MNIST': 10,
-        'CIFAR10': 10,
-        'CIFAR100': 100,
-        'EuroSAT': 10
-    }
-    num_classes = num_classes_map.get(dataset_name, 10)
-    
-    # Update config with num_classes
-    config['model']['num_classes'] = num_classes
-    
-    # Create datasets
+    val_fraction = config['dataset'].get('val_fraction', 0.1)
+    seed = config['dataset'].get('seed', 42)
+
+    if dataset_name != 'EuroSAT':
+        raise ValueError("Only EuroSAT is supported in this codebase.")
+
     train_dataset = DatasetFactory.get_dataset(
-        dataset_name, data_path, train=True, img_size=img_size, augment=True
+        dataset_name, data_path, split='train', img_size=img_size, augment=True
     )
-    
+
+    val_csv_path = os.path.join(data_path, 'val.csv')
+    if os.path.exists(val_csv_path):
+        val_dataset = DatasetFactory.get_dataset(
+            dataset_name, data_path, split='val', img_size=img_size, augment=False
+        )
+    else:
+        # Fallback to an internal random split from train.csv when val.csv is absent
+        val_dataset_full = DatasetFactory.get_dataset(
+            dataset_name, data_path, split='train', img_size=img_size, augment=False
+        )
+
+        total_samples = len(train_dataset)
+        val_size = int(total_samples * val_fraction)
+        train_size = total_samples - val_size
+        if val_size <= 0 or train_size <= 0:
+            raise ValueError("Validation fraction must be between 0 and 1 and produce non-empty splits.")
+
+        generator = torch.Generator().manual_seed(seed)
+        indices = torch.randperm(total_samples, generator=generator).tolist()
+        val_indices = indices[:val_size]
+        train_indices = indices[val_size:]
+
+        train_dataset = Subset(train_dataset, train_indices)
+        val_dataset = Subset(val_dataset_full, val_indices)
+
     test_dataset = DatasetFactory.get_dataset(
-        dataset_name, data_path, train=False, img_size=img_size, augment=False
+        dataset_name, data_path, split='test', img_size=img_size, augment=False
     )
-    
-    # Create dataloaders
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -251,6 +157,14 @@ def get_dataloaders(config: dict) -> Tuple[DataLoader, DataLoader]:
         drop_last=True
     )
     
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True
+    )
+
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
@@ -258,13 +172,10 @@ def get_dataloaders(config: dict) -> Tuple[DataLoader, DataLoader]:
         num_workers=num_workers,
         pin_memory=True
     )
+
+    config['model']['num_classes'] = 10
     
-    print(f"Dataset: {dataset_name}")
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Test samples: {len(test_dataset)}")
-    print(f"Number of classes: {num_classes}")
-    
-    return train_loader, test_loader
+    return train_loader, val_loader, test_loader
 
 
 class IJEPADataAugmentation:

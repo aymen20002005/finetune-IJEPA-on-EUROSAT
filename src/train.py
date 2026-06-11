@@ -81,7 +81,8 @@ class Trainer:
             model_name=pretrained_name,
             num_classes=num_classes,
             freeze_encoder=freeze_encoder,
-            dropout=model_config.get('dropout', 0.1)
+            dropout=model_config.get('dropout', 0.1),
+            attention_type=model_config.get('attention_type', 'self'),
         )
         
         return model

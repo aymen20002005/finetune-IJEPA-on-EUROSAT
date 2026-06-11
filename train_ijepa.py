@@ -25,7 +25,7 @@ def load_ijepa_config(dataset: str):
     config = {
         'dataset': {
             'name': dataset,
-            'data_path': '/kaggle/input/datasets/apollo2506/eurosat-dataset/EuroSAT',
+            'data_path': 'eurosat',
             'batch_size': batch_size,
             'num_workers': 4,
             'image_size': 224,
@@ -37,12 +37,15 @@ def load_ijepa_config(dataset: str):
             'pretrained_source': 'huggingface',
             'pretrained_name': IJEPA_MODEL,
             'num_classes': num_classes,
-            'dropout': 0.1
+            'dropout': 0.1,
+            'attention_heads': 8,
+            'attention_dropout': 0.1,
+            'attention_type': 'self',
         },
         'training': {
             'mode': 'linear_probe',
             'knn_k': 20,
-            'epochs': 20,
+            'epochs': 100,
             'warmup_epochs': 5,
             'base_lr': 1e-3,
             'weight_decay': 0.05,
@@ -87,6 +90,17 @@ def main():
 
     parser.add_argument('--knn-k', type=int, default=None,
                        help='Number of neighbors for kNN mode')
+
+    parser.add_argument('--attention-type', type=str, default=None,
+                       choices=['self', 'cross'],
+                       help='Attention type for the probe head (default: self)')
+
+    parser.add_argument('--early-stopping', action='store_true',
+                       help='Enable early stopping based on validation accuracy')
+    parser.add_argument('--patience', type=int, default=None,
+                       help='Early stopping patience in epochs')
+    parser.add_argument('--min-delta', type=float, default=None,
+                       help='Minimum validation improvement to reset early stopping counter')
     
     parser.add_argument('--early-stopping', action='store_true',
                        help='Enable early stopping based on validation accuracy')
@@ -121,16 +135,6 @@ def main():
 
     if args.knn_k:
         config['training']['knn_k'] = args.knn_k
-
-    if args.early_stopping:
-        config['training'].setdefault('early_stopping', {})
-        config['training']['early_stopping']['enabled'] = True
-    if args.patience is not None:
-        config['training'].setdefault('early_stopping', {})
-        config['training']['early_stopping']['patience'] = args.patience
-    if args.min_delta is not None:
-        config['training'].setdefault('early_stopping', {})
-        config['training']['early_stopping']['min_delta'] = args.min_delta
     
     # Set execution mode
     config['training']['mode'] = args.mode
@@ -138,7 +142,7 @@ def main():
         config['finetuning']['freeze_encoder'] = True
         config['finetuning']['unfreeze_after_epochs'] = None
         config['training']['base_lr'] = 1e-3  # Higher LR for linear probe
-        config['training']['epochs'] = min(20, config['training']['epochs'])
+        config['training']['epochs'] = min(1000, config['training']['epochs'])
         print("🔒 LINEAR PROBING MODE: Training only the classification head")
     
     elif args.mode == 'knn':
@@ -158,6 +162,10 @@ def main():
     print(f"Epochs:         {config['training']['epochs']}")
     print(f"Learning rate:  {config['training']['base_lr']}")
     print(f"Freeze encoder: {config['finetuning']['freeze_encoder']}")
+    print("Probe head:     attention-only")
+    print(f"Attn type:      {config['model'].get('attention_type', 'self')}")
+    print(f"Attn heads:     {config['model'].get('attention_heads', 8)}")
+    print(f"Attn dropout:   {config['model'].get('attention_dropout', 0.1)}")
     if args.mode == 'knn':
         print(f"kNN neighbors:  {config['training']['knn_k']}")
     if config['training'].get('early_stopping', {}).get('enabled', False):
